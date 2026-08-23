@@ -1,0 +1,20 @@
+node_modules/
+dist/
+apps/web/dist/
+database/data/*.sqlite*
+storage/pdf/*
+storage/backups/*
+!.gitkeep
+.env
+*.log
+coverage/
+tmp/
+*.zip
+*.tar.gz
+*-v0*.png
+dev.*.log
+.DS_Store
+
+# Local deployment branding; the public repository uses logo.svg.
+/logo.png
+/apps/web/public/brand/logo.png

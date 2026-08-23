@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title description">
+  <title id="title">WeeklyScheduling</title>
+  <desc id="description">由日历和字母 W 组成的通用标志</desc>
+  <rect width="96" height="96" rx="18" fill="#12324a"/>
+  <rect x="18" y="24" width="60" height="54" rx="8" fill="#f5f7f3"/>
+  <path d="M18 37h60" stroke="#5fbf91" stroke-width="7"/>
+  <path d="M32 17v14M64 17v14" stroke="#f5f7f3" stroke-width="7" stroke-linecap="round"/>
+  <path d="M29 49l8 18 11-15 11 15 8-18" fill="none" stroke="#12324a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
