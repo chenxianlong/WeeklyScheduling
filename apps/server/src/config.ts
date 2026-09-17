@@ -22,7 +22,6 @@ export const config = {
   webDevUrl: env("WEB_DEV_URL", "http://localhost:5173"),
   sessionSecret: env("SESSION_SECRET", "development-only-change-me"),
   organizationName: env("ORGANIZATION_NAME", "示例组织"),
-  emailAllowedDomain: env("EMAIL_ALLOWED_DOMAIN", "example.org").trim().toLowerCase(),
   databasePath: path.resolve(cwd, env("DATABASE_PATH", "database/data/meeting-schedule.sqlite")),
   academicYear: env("MEETING_SCHEDULE_ACADEMIC_YEAR", "2026-2027"),
   semester: env("MEETING_SCHEDULE_SEMESTER", "一"),
