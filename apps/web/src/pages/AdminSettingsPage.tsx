@@ -11,7 +11,7 @@ type UserRow = {
   id: number;
   username: string;
   name: string;
-  email: string | null;
+  emails: string | null;
   role: Role;
   status: "active" | "disabled";
   departmentId: number | null;
@@ -20,7 +20,7 @@ type UserRow = {
 };
 type UserEdit = Pick<
   UserRow,
-  "id" | "username" | "name" | "email" | "role" | "status" | "departmentId"
+  "id" | "username" | "name" | "role" | "status" | "departmentId"
 > & { password: string };
 type UserCreate = Omit<UserEdit, "id">;
 type ReferenceItem = {
@@ -69,13 +69,7 @@ const tabs = [
   { id: "audit", label: "审计日志", icon: History },
 ] as const;
 
-export function AdminSettingsPage({
-  currentUser,
-  emailAllowedDomain,
-}: {
-  currentUser: CurrentUser;
-  emailAllowedDomain: string;
-}) {
+export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser }) {
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("users");
   const [newName, setNewName] = useState("");
   const [newCapacity, setNewCapacity] = useState("");
@@ -241,7 +235,6 @@ export function AdminSettingsPage({
                 setCreatingUser({
                   username: "",
                   name: "",
-                  email: null,
                   password: "",
                   departmentId: null,
                   role: "staff",
@@ -303,23 +296,6 @@ export function AdminSettingsPage({
                       setCreatingUser({ ...creatingUser, password: event.target.value })
                     }
                     autoComplete="new-password"
-                  />
-                </Field>
-                <Field
-                  label="通知邮箱"
-                  hint={`用于接收填报退回通知，仅支持 @${emailAllowedDomain}`}
-                >
-                  <Input
-                    type="email"
-                    value={creatingUser.email ?? ""}
-                    onChange={(event) =>
-                      setCreatingUser({
-                        ...creatingUser,
-                        email: event.target.value.toLowerCase() || null,
-                      })
-                    }
-                    autoComplete="email"
-                    placeholder={`name@${emailAllowedDomain}`}
                   />
                 </Field>
                 <Field label="所属部门">
@@ -448,23 +424,6 @@ export function AdminSettingsPage({
                     placeholder="留空则保持原密码"
                   />
                 </Field>
-                <Field
-                  label="通知邮箱"
-                  hint={`用于接收填报退回通知，仅支持 @${emailAllowedDomain}`}
-                >
-                  <Input
-                    type="email"
-                    value={editingUser.email ?? ""}
-                    onChange={(event) =>
-                      setEditingUser({
-                        ...editingUser,
-                        email: event.target.value.toLowerCase() || null,
-                      })
-                    }
-                    autoComplete="email"
-                    placeholder={`name@${emailAllowedDomain}`}
-                  />
-                </Field>
                 <Field label="所属部门">
                   <Select
                     value={editingUser.departmentId ?? ""}
@@ -544,7 +503,7 @@ export function AdminSettingsPage({
                   <tr>
                     <th className="px-5 py-3">姓名</th>
                     <th className="px-5 py-3">登录账号</th>
-                    <th className="px-5 py-3">通知邮箱</th>
+                    <th className="px-5 py-3">已验证邮箱</th>
                     <th className="px-5 py-3">所属部门</th>
                     <th className="px-5 py-3">角色</th>
                     <th className="px-5 py-3">状态</th>
@@ -558,7 +517,7 @@ export function AdminSettingsPage({
                       <td className="px-5 py-4 font-semibold text-ink-900">{user.name}</td>
                       <td className="px-5 py-4 font-mono text-xs text-slate-600">{user.username}</td>
                       <td className="px-5 py-4 text-slate-600">
-                        {user.email ?? <span className="text-amber-700">未绑定</span>}
+                        {user.emails ?? <span className="text-amber-700">未绑定</span>}
                       </td>
                       <td className="px-5 py-4 text-slate-600">{user.department ?? "—"}</td>
                       <td className="px-5 py-4 text-slate-600">{roleLabels[user.role]}</td>
@@ -590,7 +549,6 @@ export function AdminSettingsPage({
                                 id: user.id,
                                 username: user.username,
                                 name: user.name,
-                                email: user.email,
                                 role: user.role,
                                 status: user.status,
                                 departmentId: user.departmentId,

@@ -84,7 +84,6 @@ describe("administrator management permissions", () => {
       .send({
         username: "new-staff",
         name: "新增填报员",
-        email: "new-staff@example.org",
         password: "NewStaff@2026",
         role: "staff",
         status: "active",
@@ -93,10 +92,9 @@ describe("administrator management permissions", () => {
       .expect(201);
 
     const saved = sqlite
-      .prepare("SELECT username, email, password_hash, role, status, department_id FROM users WHERE id=?")
+      .prepare("SELECT username, password_hash, role, status, department_id FROM users WHERE id=?")
       .get(created.body.id) as {
       username: string;
-      email: string;
       password_hash: string;
       role: string;
       status: string;
@@ -104,7 +102,6 @@ describe("administrator management permissions", () => {
     };
     expect(saved).toMatchObject({
       username: "new-staff",
-      email: "new-staff@example.org",
       role: "staff",
       status: "active",
       department_id: 1,
@@ -117,7 +114,6 @@ describe("administrator management permissions", () => {
       .send({
         username: "new-staff",
         name: "重复账号",
-        email: "another@example.org",
         password: "NewStaff@2026",
         role: "staff",
         status: "active",
@@ -131,7 +127,6 @@ describe("administrator management permissions", () => {
       .send({
         username: "another-system-admin",
         name: "越权账号",
-        email: "system-admin@example.org",
         password: "SystemAdmin@2026",
         role: "system_admin",
         status: "active",
@@ -139,19 +134,28 @@ describe("administrator management permissions", () => {
       })
       .expect(403);
 
-    await agent
-      .post("/api/admin/users")
-      .set("x-csrf-token", csrfToken)
-      .send({
-        username: "external-email",
-        name: "外部邮箱",
-        email: "someone@outside.example",
-        password: "External@2026",
-        role: "staff",
-        status: "active",
-        departmentId: 1,
-      })
-      .expect(422);
+  });
+
+  it("allows a user to bind and verify multiple school email addresses", async () => {
+    for (const email of ["business-admin@example.org", "business-admin2@example.org"]) {
+      const requested = await agent
+        .post("/api/account/emails")
+        .set("x-csrf-token", csrfToken)
+        .send({ email })
+        .expect(202);
+      const queued = sqlite
+        .prepare("SELECT text_body AS textBody FROM email_notifications WHERE recipient=? ORDER BY id DESC")
+        .get(email) as { textBody: string };
+      const code = queued.textBody.match(/\b(\d{6})\b/)?.[1];
+      expect(code).toMatch(/^\d{6}$/);
+      await agent
+        .post(`/api/account/emails/${requested.body.id}/verify`)
+        .set("x-csrf-token", csrfToken)
+        .send({ code })
+        .expect(200);
+    }
+    const result = await agent.get("/api/account/emails").expect(200);
+    expect(result.body.rows.filter((row: { verifiedAt: string | null }) => row.verifiedAt)).toHaveLength(2);
   });
 
   it("queues an email notification when a bound user's submission is returned", async () => {
@@ -159,6 +163,23 @@ describe("administrator management permissions", () => {
     const applicant = sqlite
       .prepare("SELECT id FROM users WHERE username='new-staff'")
       .get() as { id: number };
+    sqlite
+      .prepare(
+        `INSERT INTO user_emails(user_id, email, verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        applicant.id,
+        "new-staff@example.org",
+        stamp,
+        stamp,
+        stamp,
+        applicant.id,
+        "new-staff2@example.org",
+        stamp,
+        stamp,
+        stamp,
+      );
     const submissionId = Number(
       sqlite
         .prepare(
@@ -176,22 +197,25 @@ describe("administrator management permissions", () => {
       .send({ comment: "请补充参加人员信息" })
       .expect(200);
 
-    const notification = sqlite
+    const notifications = sqlite
       .prepare(
         `SELECT recipient, subject, text_body AS textBody, status, attempts
-         FROM email_notifications WHERE submission_id=?`,
+         FROM email_notifications WHERE submission_id=? ORDER BY id`,
       )
-      .get(submissionId) as {
+      .all(submissionId) as Array<{
       recipient: string;
       subject: string;
       textBody: string;
       status: string;
       attempts: number;
-    };
-    expect(notification.recipient).toBe("new-staff@example.org");
-    expect(notification.subject).toContain("第3周填报已退回");
-    expect(notification.textBody).toContain("请补充参加人员信息");
-    expect(notification).toMatchObject({ status: "pending", attempts: 0 });
+    }>;
+    expect(notifications.map((row) => row.recipient)).toEqual([
+      "new-staff@example.org",
+      "new-staff2@example.org",
+    ]);
+    expect(notifications[0].subject).toContain("第3周填报已退回");
+    expect(notifications[0].textBody).toContain("请补充参加人员信息");
+    expect(notifications[0]).toMatchObject({ status: "pending", attempts: 0 });
   });
 
   it("deletes unused users and reference data but preserves referenced data", async () => {

@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Mail,
   Menu,
   Settings,
   X,
@@ -20,6 +21,7 @@ const baseNavigation = [
   { to: "/", label: "工作台", icon: LayoutDashboard, end: true },
   { to: "/submissions", label: "我的申请", icon: FileClock },
   { to: "/submissions/new", label: "新建填报", icon: FilePlus2 },
+  { to: "/account/emails", label: "我的通知邮箱", icon: Mail },
 ];
 
 export function AppShell({

@@ -71,38 +71,44 @@ reviewsRouter.post("/:id/return", (request, response) => {
   if (existing.status !== "submitted") throw new HttpError(409, "申请已不在待审核状态");
   const recipient = sqlite
     .prepare(
-      `SELECT u.email, u.name AS applicantName, s.academic_year AS academicYear,
+      `SELECT u.name AS applicantName, s.applicant_user_id AS applicantUserId,
+       s.academic_year AS academicYear,
        s.semester, s.week, COALESCE(d.name, s.custom_department, '未设置部门') AS department
        FROM submissions s JOIN users u ON u.id=s.applicant_user_id
        LEFT JOIN departments d ON d.id=s.department_id WHERE s.id=?`,
     )
     .get(id) as {
-    email: string | null;
     applicantName: string;
+    applicantUserId: number;
     academicYear: string;
     semester: string;
     week: number;
     department: string;
   };
+  const recipientEmails = (
+    sqlite
+      .prepare("SELECT email FROM user_emails WHERE user_id=? AND verified_at IS NOT NULL ORDER BY id")
+      .all(recipient.applicantUserId) as Array<{ email: string }>
+  ).map((row) => row.email);
   const stamp = nowIso();
   sqlite.transaction(() => {
-    const reviewLog = sqlite
+    sqlite
       .prepare(
         `UPDATE submissions SET status='returned', returned_at=?, returned_by=?,
          return_reason=?, updated_at=? WHERE id=?`,
       )
       .run(stamp, request.currentUser!.id, input.comment, stamp, id);
-    sqlite
+    const reviewLog = sqlite
       .prepare(
         `INSERT INTO review_logs(submission_id, action, from_status, to_status, comment, operator_user_id, created_at)
          VALUES (?, 'return', 'submitted', 'returned', ?, ?, ?)`,
       )
       .run(id, input.comment, request.currentUser!.id, stamp);
-    if (recipient.email) {
+    if (recipientEmails.length) {
       enqueueReturnNotification({
         submissionId: id,
         reviewLogId: Number(reviewLog.lastInsertRowid),
-        recipient: recipient.email,
+        recipients: recipientEmails,
         applicantName: recipient.applicantName,
         academicYear: recipient.academicYear,
         semester: recipient.semester,
@@ -114,7 +120,7 @@ reviewsRouter.post("/:id/return", (request, response) => {
   })();
   audit(request, "review.return", "submission", id, {
     ...input,
-    emailNotification: recipient.email ? "queued" : "skipped_no_email",
+    emailNotification: recipientEmails.length ? `queued:${recipientEmails.length}` : "skipped_no_email",
   });
   response.json(getSubmission(id));
 });

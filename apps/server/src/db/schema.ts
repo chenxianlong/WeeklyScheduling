@@ -15,6 +15,17 @@ export const users = sqliteTable("users", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const userEmails = sqliteTable("user_emails", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  email: text("email").notNull().unique(),
+  verificationTokenHash: text("verification_token_hash"),
+  verificationExpiresAt: text("verification_expires_at"),
+  verifiedAt: text("verified_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const departments = sqliteTable("departments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),

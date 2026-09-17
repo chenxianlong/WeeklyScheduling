@@ -18,6 +18,7 @@ export const config = {
   host: env("HOST", "0.0.0.0"),
   port: Number(env("PORT", "3000")),
   appUrl: env("APP_URL", "http://localhost:3000"),
+  emailAllowedDomain: env("EMAIL_ALLOWED_DOMAIN", "example.org").trim().toLowerCase(),
   webDevUrl: env("WEB_DEV_URL", "http://localhost:5173"),
   sessionSecret: env("SESSION_SECRET", "development-only-change-me"),
   organizationName: env("ORGANIZATION_NAME", "示例组织"),

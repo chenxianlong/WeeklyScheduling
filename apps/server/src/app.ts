@@ -17,6 +17,7 @@ import { reviewsRouter } from "./routes/reviews.js";
 import { submissionsRouter } from "./routes/submissions.js";
 import { BetterSqliteSessionStore } from "./services/session-store.js";
 import { adminRouter } from "./routes/admin.js";
+import { accountRouter } from "./routes/account.js";
 
 export function createApp() {
   const app = express();
@@ -57,6 +58,7 @@ export function createApp() {
   app.use(attachUser);
   app.use("/api", csrfProtection);
   app.use("/api/auth", authRouter);
+  app.use("/api/account", accountRouter);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/meta", metaRouter);
   app.use("/api/submissions", submissionsRouter);

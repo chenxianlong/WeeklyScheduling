@@ -5,7 +5,7 @@ import { nowIso, sqlite } from "../db/client.js";
 type ReturnNotification = {
   submissionId: number;
   reviewLogId: number;
-  recipient: string;
+  recipients: string[];
   applicantName: string;
   academicYear: string;
   semester: string;
@@ -48,25 +48,63 @@ export function enqueueReturnNotification(input: ReturnNotification) {
       <p><a href="${escapeHtml(detailUrl)}" style="display:inline-block;background:#8a1c22;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px">查看并修改填报</a></p>
       <p style="margin-top:28px;color:#64748b;font-size:13px">此邮件由${escapeHtml(config.organizationName)}周工作安排系统自动发送，请勿直接回复。</p>
     </div>`;
+  for (const recipient of input.recipients) {
+    queueEmail({
+      submissionId: input.submissionId,
+      dedupeKey: `return:${input.reviewLogId}:${recipient}`,
+      recipient,
+      subject,
+      textBody,
+      htmlBody,
+    });
+  }
+}
+
+function queueEmail(input: {
+  submissionId?: number;
+  dedupeKey: string;
+  recipient: string;
+  subject: string;
+  textBody: string;
+  htmlBody: string;
+}) {
   const stamp = nowIso();
   sqlite
     .prepare(
       `INSERT OR IGNORE INTO email_notifications(
-       submission_id, review_log_id, recipient, subject, text_body, html_body,
+       submission_id, review_log_id, dedupe_key, recipient, subject, text_body, html_body,
        status, attempts, next_attempt_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+       ) VALUES (?, NULL, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
     )
     .run(
-      input.submissionId,
-      input.reviewLogId,
+      input.submissionId ?? null,
+      input.dedupeKey,
       input.recipient,
-      subject,
-      textBody,
-      htmlBody,
+      input.subject,
+      input.textBody,
+      input.htmlBody,
       stamp,
       stamp,
       stamp,
     );
+}
+
+export function enqueueEmailVerification(input: {
+  emailId: number;
+  recipient: string;
+  name: string;
+  code: string;
+}) {
+  const subject = "【周工作安排】验证您的学校邮箱";
+  const textBody = `${input.name}，您好：\n\n您的邮箱验证码是：${input.code}\n\n验证码 15 分钟内有效。如非本人操作，请忽略本邮件。\n\n${schoolName}周工作安排系统`;
+  const htmlBody = `<div style="font-family:'Microsoft YaHei',Arial,sans-serif;color:#1e293b;line-height:1.8;max-width:640px;margin:auto"><h2 style="color:#8a1c22">验证学校邮箱</h2><p>${escapeHtml(input.name)}，您好：</p><p>您的邮箱验证码是：</p><p style="font-size:30px;font-weight:700;letter-spacing:8px;color:#8a1c22">${input.code}</p><p>验证码 15 分钟内有效。如非本人操作，请忽略本邮件。</p><p style="color:#64748b;font-size:13px">${schoolName}周工作安排系统</p></div>`;
+  queueEmail({
+    dedupeKey: `verify:${input.emailId}:${Date.now()}`,
+    recipient: input.recipient,
+    subject,
+    textBody,
+    htmlBody,
+  });
 }
 
 const smtpConfigured = Boolean(

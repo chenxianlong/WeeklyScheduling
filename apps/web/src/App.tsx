@@ -14,6 +14,7 @@ import { SubmissionEditorPage } from "./pages/SubmissionEditorPage";
 import { SubmissionListPage } from "./pages/SubmissionListPage";
 import { SharedSubmissionsPage } from "./pages/SharedSubmissionsPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
+import { AccountEmailsPage } from "./pages/AccountEmailsPage";
 
 type Session = { user: CurrentUser | null; config: AppConfig };
 
@@ -49,6 +50,7 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="submissions" element={<SubmissionListPage />} />
+        <Route path="account/emails" element={<AccountEmailsPage />} />
         <Route path="submissions/shared" element={<SharedSubmissionsPage config={config} />} />
         <Route path="submissions/new" element={<SubmissionEditorPage config={config} user={user} />} />
         <Route path="submissions/:id" element={<SubmissionDetailPage user={user} />} />
@@ -73,10 +75,7 @@ export default function App() {
           path="admin/settings"
           element={
             isAdmin ? (
-              <AdminSettingsPage
-                currentUser={user}
-                emailAllowedDomain={config.emailAllowedDomain}
-              />
+              <AdminSettingsPage currentUser={user} />
             ) : (
               <Navigate to="/" replace />
             )

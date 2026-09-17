@@ -146,6 +146,17 @@ const migrations = [
   );
   CREATE INDEX IF NOT EXISTS email_notifications_queue_idx
     ON email_notifications(status, next_attempt_at);
+  CREATE TABLE IF NOT EXISTS user_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    verification_token_hash TEXT,
+    verification_expires_at TEXT,
+    verified_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS user_emails_user_idx ON user_emails(user_id, id);
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -161,9 +172,23 @@ sqlite.transaction(() => {
   if (!userColumns.some((column) => column.name === "email")) {
     sqlite.exec("ALTER TABLE users ADD COLUMN email TEXT");
   }
+  const notificationColumns = sqlite
+    .prepare("PRAGMA table_info(email_notifications)")
+    .all() as Array<{ name: string }>;
+  if (!notificationColumns.some((column) => column.name === "dedupe_key")) {
+    sqlite.exec("ALTER TABLE email_notifications ADD COLUMN dedupe_key TEXT");
+  }
   sqlite.exec(
     `CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique
      ON users(email COLLATE NOCASE) WHERE email IS NOT NULL`,
+  );
+  sqlite.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS email_notifications_dedupe_unique
+     ON email_notifications(dedupe_key) WHERE dedupe_key IS NOT NULL`,
+  );
+  sqlite.exec(
+    `INSERT OR IGNORE INTO user_emails(user_id, email, verified_at, created_at, updated_at)
+     SELECT id, email, updated_at, created_at, updated_at FROM users WHERE email IS NOT NULL`,
   );
 })();
 
