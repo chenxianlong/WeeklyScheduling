@@ -52,7 +52,7 @@ export function AccountEmailsPage() {
       <PageHeader
         eyebrow="ACCOUNT SECURITY"
         title="我的通知邮箱"
-        description="绑定并验证学校邮箱；填报被管理员退回时，所有已验证邮箱都会收到通知。"
+        description="绑定并验证学校邮箱；填报审核通过或被退回时，所有已验证邮箱都会收到通知。"
       />
       <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
         <Card className="overflow-hidden">
@@ -73,7 +73,7 @@ export function AccountEmailsPage() {
                       <p className="mt-1 text-xs text-slate-500">
                         {row.verifiedAt ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700">
-                            <CheckCircle2 className="size-3.5" /> 已验证，可接收退回通知
+                            <CheckCircle2 className="size-3.5" /> 已验证，可接收审核结果通知
                           </span>
                         ) : (
                           "等待验证，请输入邮件中的 6 位验证码"

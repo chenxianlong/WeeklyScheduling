@@ -60,6 +60,24 @@ export function enqueueReturnNotification(input: ReturnNotification) {
   }
 }
 
+export function enqueueApprovalNotification(input: Omit<ReturnNotification, "reason">) {
+  const subject = `【周工作安排】第${input.week}周填报已审核通过`;
+  const detailUrl = `${config.appUrl.replace(/\/$/, "")}/submissions/${input.submissionId}`;
+  const term = `${input.academicYear}学年度第${input.semester}学期`;
+  const textBody = `${input.applicantName}，您好：\n\n您提交的${term}第${input.week}周工作安排（${input.department}）已审核通过。\n\n查看详情：${detailUrl}\n\n${config.organizationName}周工作安排系统`;
+  const htmlBody = `<div style="font-family:'Microsoft YaHei',Arial,sans-serif;color:#1e293b;line-height:1.8;max-width:640px;margin:auto"><h2 style="color:#047857">周工作安排填报审核通过</h2><p>${escapeHtml(input.applicantName)}，您好：</p><p>您提交的 <strong>${escapeHtml(term)}第${input.week}周工作安排</strong>（${escapeHtml(input.department)}）已审核通过。</p><p><a href="${escapeHtml(detailUrl)}" style="display:inline-block;background:#047857;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px">查看填报详情</a></p><p style="margin-top:28px;color:#64748b;font-size:13px">此邮件由${escapeHtml(config.organizationName)}周工作安排系统自动发送，请勿直接回复。</p></div>`;
+  for (const recipient of input.recipients) {
+    queueEmail({
+      submissionId: input.submissionId,
+      dedupeKey: `approve:${input.reviewLogId}:${recipient}`,
+      recipient,
+      subject,
+      textBody,
+      htmlBody,
+    });
+  }
+}
+
 function queueEmail(input: {
   submissionId?: number;
   dedupeKey: string;
@@ -96,8 +114,8 @@ export function enqueueEmailVerification(input: {
   code: string;
 }) {
   const subject = "【周工作安排】验证您的学校邮箱";
-  const textBody = `${input.name}，您好：\n\n您的邮箱验证码是：${input.code}\n\n验证码 15 分钟内有效。如非本人操作，请忽略本邮件。\n\n${schoolName}周工作安排系统`;
-  const htmlBody = `<div style="font-family:'Microsoft YaHei',Arial,sans-serif;color:#1e293b;line-height:1.8;max-width:640px;margin:auto"><h2 style="color:#8a1c22">验证学校邮箱</h2><p>${escapeHtml(input.name)}，您好：</p><p>您的邮箱验证码是：</p><p style="font-size:30px;font-weight:700;letter-spacing:8px;color:#8a1c22">${input.code}</p><p>验证码 15 分钟内有效。如非本人操作，请忽略本邮件。</p><p style="color:#64748b;font-size:13px">${schoolName}周工作安排系统</p></div>`;
+  const textBody = `${input.name}，您好：\n\n您的邮箱验证码是：${input.code}\n\n验证码 15 分钟内有效。如非本人操作，请忽略本邮件。\n\n${config.organizationName}周工作安排系统`;
+  const htmlBody = `<div style="font-family:'Microsoft YaHei',Arial,sans-serif;color:#1e293b;line-height:1.8;max-width:640px;margin:auto"><h2 style="color:#8a1c22">验证学校邮箱</h2><p>${escapeHtml(input.name)}，您好：</p><p>您的邮箱验证码是：</p><p style="font-size:30px;font-weight:700;letter-spacing:8px;color:#8a1c22">${input.code}</p><p>验证码 15 分钟内有效。如非本人操作，请忽略本邮件。</p><p style="color:#64748b;font-size:13px">${escapeHtml(config.organizationName)}周工作安排系统</p></div>`;
   queueEmail({
     dedupeKey: `verify:${input.emailId}:${Date.now()}`,
     recipient: input.recipient,

@@ -231,7 +231,19 @@ submissionsRouter.delete("/:id", (request, response) => {
   ) {
     throw new HttpError(403, "当前状态下不能删除此申请");
   }
-  sqlite.prepare("DELETE FROM submissions WHERE id=?").run(id);
+  const deleted = sqlite.transaction(() => {
+    sqlite
+      .prepare(
+        `UPDATE publication_items SET source_submission_id=NULL, source_item_id=NULL
+         WHERE source_submission_id=?`,
+      )
+      .run(id);
+    sqlite.prepare("DELETE FROM email_notifications WHERE submission_id=?").run(id);
+    sqlite.prepare("DELETE FROM review_logs WHERE submission_id=?").run(id);
+    sqlite.prepare("DELETE FROM submission_items WHERE submission_id=?").run(id);
+    return sqlite.prepare("DELETE FROM submissions WHERE id=?").run(id).changes;
+  })();
+  if (!deleted) throw new HttpError(404, "申请不存在或已被删除");
   audit(request, "submission.delete", "submission", id);
   response.json({ ok: true });
 });

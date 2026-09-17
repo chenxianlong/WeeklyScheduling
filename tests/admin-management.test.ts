@@ -218,6 +218,66 @@ describe("administrator management permissions", () => {
     expect(notifications[0]).toMatchObject({ status: "pending", attempts: 0 });
   });
 
+  it("notifies approval, blocks staff deletion, and lets an administrator delete permanently", async () => {
+    const stamp = new Date().toISOString();
+    const applicant = sqlite
+      .prepare("SELECT id FROM users WHERE username='new-staff'")
+      .get() as { id: number };
+    const submissionId = Number(
+      sqlite
+        .prepare(
+          `INSERT INTO submissions(
+           academic_year, semester, week, department_id, applicant_user_id,
+           status, submitted_at, created_at, updated_at
+           ) VALUES ('2026-2027', '一', 4, 1, ?, 'submitted', ?, ?, ?)`,
+        )
+        .run(applicant.id, stamp, stamp, stamp).lastInsertRowid,
+    );
+
+    await agent
+      .post(`/api/admin/reviews/${submissionId}/approve`)
+      .set("x-csrf-token", csrfToken)
+      .send({ comment: "审核通过" })
+      .expect(200);
+
+    const notifications = sqlite
+      .prepare(
+        `SELECT recipient, subject, text_body AS textBody
+         FROM email_notifications WHERE submission_id=? ORDER BY id`,
+      )
+      .all(submissionId) as Array<{ recipient: string; subject: string; textBody: string }>;
+    expect(notifications.map((row) => row.recipient)).toEqual([
+      "new-staff@example.org",
+      "new-staff2@example.org",
+    ]);
+    expect(notifications[0].subject).toContain("第4周填报已审核通过");
+    expect(notifications[0].textBody).toContain("已审核通过");
+
+    const staffAgent = request.agent(agent.app);
+    const staffCsrf = await staffAgent.get("/api/auth/csrf").expect(200);
+    await staffAgent
+      .post("/api/auth/login")
+      .set("x-csrf-token", staffCsrf.body.csrfToken)
+      .send({ username: "new-staff", password: "NewStaff@2026" })
+      .expect(200);
+    const staffDeleteCsrf = (await staffAgent.get("/api/auth/csrf").expect(200)).body.csrfToken;
+    await staffAgent
+      .delete(`/api/submissions/${submissionId}`)
+      .set("x-csrf-token", staffDeleteCsrf)
+      .expect(403);
+
+    await agent
+      .delete(`/api/submissions/${submissionId}`)
+      .set("x-csrf-token", csrfToken)
+      .expect(200);
+    await agent.get(`/api/submissions/${submissionId}`).expect(404);
+    expect(sqlite.prepare("SELECT id FROM submissions WHERE id=?").get(submissionId)).toBeUndefined();
+    expect(
+      sqlite.prepare("SELECT id FROM email_notifications WHERE submission_id=?").get(submissionId),
+    ).toBeUndefined();
+    expect(sqlite.prepare("SELECT id FROM review_logs WHERE submission_id=?").get(submissionId)).toBeUndefined();
+  });
+
   it("deletes unused users and reference data but preserves referenced data", async () => {
     const stamp = new Date().toISOString();
     const userId = Number(

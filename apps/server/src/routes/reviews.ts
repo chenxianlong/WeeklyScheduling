@@ -4,12 +4,40 @@ import { nowIso, sqlite } from "../db/client.js";
 import { HttpError } from "../http.js";
 import { requireAdmin } from "../middleware/auth.js";
 import { audit } from "../services/audit.js";
-import { enqueueReturnNotification } from "../services/email-notifications.js";
+import {
+  enqueueApprovalNotification,
+  enqueueReturnNotification,
+} from "../services/email-notifications.js";
 import { getSubmission } from "../services/submissions.js";
 import { getAcademicTerm } from "../services/schedule-settings.js";
 
 export const reviewsRouter = Router();
 reviewsRouter.use(requireAdmin);
+
+function notificationRecipient(submissionId: number) {
+  const submission = sqlite
+    .prepare(
+      `SELECT u.name AS applicantName, s.applicant_user_id AS applicantUserId,
+       s.academic_year AS academicYear, s.semester, s.week,
+       COALESCE(d.name, s.custom_department, '未设置部门') AS department
+       FROM submissions s JOIN users u ON u.id=s.applicant_user_id
+       LEFT JOIN departments d ON d.id=s.department_id WHERE s.id=?`,
+    )
+    .get(submissionId) as {
+    applicantName: string;
+    applicantUserId: number;
+    academicYear: string;
+    semester: string;
+    week: number;
+    department: string;
+  };
+  const recipients = (
+    sqlite
+      .prepare("SELECT email FROM user_emails WHERE user_id=? AND verified_at IS NOT NULL ORDER BY id")
+      .all(submission.applicantUserId) as Array<{ email: string }>
+  ).map((row) => row.email);
+  return { ...submission, recipients };
+}
 
 reviewsRouter.get("/", (request, response) => {
   const term = getAcademicTerm();
@@ -45,6 +73,7 @@ reviewsRouter.post("/:id/approve", (request, response) => {
   const input = reviewInputSchema.parse(request.body);
   const existing = getSubmission(id);
   if (existing.status !== "submitted") throw new HttpError(409, "申请已不在待审核状态");
+  const recipient = notificationRecipient(id);
   const stamp = nowIso();
   sqlite.transaction(() => {
     sqlite
@@ -53,14 +82,31 @@ reviewsRouter.post("/:id/approve", (request, response) => {
          returned_at=NULL, returned_by=NULL, return_reason=NULL, updated_at=? WHERE id=?`,
       )
       .run(stamp, request.currentUser!.id, stamp, id);
-    sqlite
+    const reviewLog = sqlite
       .prepare(
         `INSERT INTO review_logs(submission_id, action, from_status, to_status, comment, operator_user_id, created_at)
          VALUES (?, 'approve', 'submitted', 'approved', ?, ?, ?)`,
       )
       .run(id, input.comment ?? null, request.currentUser!.id, stamp);
+    if (recipient.recipients.length) {
+      enqueueApprovalNotification({
+        submissionId: id,
+        reviewLogId: Number(reviewLog.lastInsertRowid),
+        recipients: recipient.recipients,
+        applicantName: recipient.applicantName,
+        academicYear: recipient.academicYear,
+        semester: recipient.semester,
+        week: recipient.week,
+        department: recipient.department,
+      });
+    }
   })();
-  audit(request, "review.approve", "submission", id, input);
+  audit(request, "review.approve", "submission", id, {
+    ...input,
+    emailNotification: recipient.recipients.length
+      ? `queued:${recipient.recipients.length}`
+      : "skipped_no_email",
+  });
   response.json(getSubmission(id));
 });
 
@@ -69,27 +115,7 @@ reviewsRouter.post("/:id/return", (request, response) => {
   const input = returnInputSchema.parse(request.body);
   const existing = getSubmission(id);
   if (existing.status !== "submitted") throw new HttpError(409, "申请已不在待审核状态");
-  const recipient = sqlite
-    .prepare(
-      `SELECT u.name AS applicantName, s.applicant_user_id AS applicantUserId,
-       s.academic_year AS academicYear,
-       s.semester, s.week, COALESCE(d.name, s.custom_department, '未设置部门') AS department
-       FROM submissions s JOIN users u ON u.id=s.applicant_user_id
-       LEFT JOIN departments d ON d.id=s.department_id WHERE s.id=?`,
-    )
-    .get(id) as {
-    applicantName: string;
-    applicantUserId: number;
-    academicYear: string;
-    semester: string;
-    week: number;
-    department: string;
-  };
-  const recipientEmails = (
-    sqlite
-      .prepare("SELECT email FROM user_emails WHERE user_id=? AND verified_at IS NOT NULL ORDER BY id")
-      .all(recipient.applicantUserId) as Array<{ email: string }>
-  ).map((row) => row.email);
+  const recipient = notificationRecipient(id);
   const stamp = nowIso();
   sqlite.transaction(() => {
     sqlite
@@ -104,11 +130,11 @@ reviewsRouter.post("/:id/return", (request, response) => {
          VALUES (?, 'return', 'submitted', 'returned', ?, ?, ?)`,
       )
       .run(id, input.comment, request.currentUser!.id, stamp);
-    if (recipientEmails.length) {
+    if (recipient.recipients.length) {
       enqueueReturnNotification({
         submissionId: id,
         reviewLogId: Number(reviewLog.lastInsertRowid),
-        recipients: recipientEmails,
+        recipients: recipient.recipients,
         applicantName: recipient.applicantName,
         academicYear: recipient.academicYear,
         semester: recipient.semester,
@@ -120,7 +146,9 @@ reviewsRouter.post("/:id/return", (request, response) => {
   })();
   audit(request, "review.return", "submission", id, {
     ...input,
-    emailNotification: recipientEmails.length ? `queued:${recipientEmails.length}` : "skipped_no_email",
+    emailNotification: recipient.recipients.length
+      ? `queued:${recipient.recipients.length}`
+      : "skipped_no_email",
   });
   response.json(getSubmission(id));
 });
