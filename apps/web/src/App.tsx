@@ -71,7 +71,16 @@ export default function App() {
         />
         <Route
           path="admin/settings"
-          element={isAdmin ? <AdminSettingsPage currentUser={user} /> : <Navigate to="/" replace />}
+          element={
+            isAdmin ? (
+              <AdminSettingsPage
+                currentUser={user}
+                emailAllowedDomain={config.emailAllowedDomain}
+              />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -11,6 +11,7 @@ type UserRow = {
   id: number;
   username: string;
   name: string;
+  email: string | null;
   role: Role;
   status: "active" | "disabled";
   departmentId: number | null;
@@ -19,8 +20,9 @@ type UserRow = {
 };
 type UserEdit = Pick<
   UserRow,
-  "id" | "username" | "name" | "role" | "status" | "departmentId"
+  "id" | "username" | "name" | "email" | "role" | "status" | "departmentId"
 > & { password: string };
+type UserCreate = Omit<UserEdit, "id">;
 type ReferenceItem = {
   id: number;
   name: string;
@@ -67,10 +69,17 @@ const tabs = [
   { id: "audit", label: "审计日志", icon: History },
 ] as const;
 
-export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser }) {
+export function AdminSettingsPage({
+  currentUser,
+  emailAllowedDomain,
+}: {
+  currentUser: CurrentUser;
+  emailAllowedDomain: string;
+}) {
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("users");
   const [newName, setNewName] = useState("");
   const [newCapacity, setNewCapacity] = useState("");
+  const [creatingUser, setCreatingUser] = useState<UserCreate | null>(null);
   const [editingUser, setEditingUser] = useState<UserEdit | null>(null);
   const [editingReference, setEditingReference] = useState<ReferenceEdit | null>(null);
   const [academicYear, setAcademicYear] = useState("");
@@ -102,6 +111,13 @@ export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser })
     setPreWeekStartDate(scheduleSettings.data.preWeekStartDate ?? "");
     setFirstWeekStartDate(scheduleSettings.data.firstWeekStartDate ?? "");
   }, [scheduleSettings.data]);
+  const createUser = useMutation({
+    mutationFn: (input: UserCreate) => mutation<{ id: number }>("/admin/users", "POST", input),
+    onSuccess: async () => {
+      setCreatingUser(null);
+      await queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
   const updateUser = useMutation({
     mutationFn: ({ id, ...input }: UserEdit) =>
       mutation(`/admin/users/${id}`, "PATCH", {
@@ -218,6 +234,170 @@ export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser })
       </div>
       {tab === "users" && (
         <div className="grid gap-5">
+          <div className="flex justify-end">
+            <Button
+              onClick={() => {
+                setEditingUser(null);
+                setCreatingUser({
+                  username: "",
+                  name: "",
+                  email: null,
+                  password: "",
+                  departmentId: null,
+                  role: "staff",
+                  status: "active",
+                });
+              }}
+            >
+              <Plus className="size-4" /> 新增用户
+            </Button>
+          </div>
+          {creatingUser && (
+            <Card className="p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="font-serif-cn text-lg font-bold text-ink-900">新增登录账号</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    设置用户的初始密码、所属部门和角色权限，创建后立即生效。
+                  </p>
+                </div>
+                <button
+                  className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  onClick={() => setCreatingUser(null)}
+                  aria-label="关闭新增"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <form
+                className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  createUser.mutate(creatingUser);
+                }}
+              >
+                <Field label="登录账号" required hint="仅可使用小写字母、数字、点、下划线和连字符">
+                  <Input
+                    value={creatingUser.username}
+                    onChange={(event) =>
+                      setCreatingUser({ ...creatingUser, username: event.target.value.toLowerCase() })
+                    }
+                    autoComplete="off"
+                    placeholder="例如：zhangsan"
+                  />
+                </Field>
+                <Field label="显示名称" required>
+                  <Input
+                    value={creatingUser.name}
+                    onChange={(event) =>
+                      setCreatingUser({ ...creatingUser, name: event.target.value })
+                    }
+                    placeholder="例如：张三"
+                  />
+                </Field>
+                <Field label="初始密码" required hint="至少 8 位，建议包含字母、数字和符号">
+                  <Input
+                    type="password"
+                    value={creatingUser.password}
+                    onChange={(event) =>
+                      setCreatingUser({ ...creatingUser, password: event.target.value })
+                    }
+                    autoComplete="new-password"
+                  />
+                </Field>
+                <Field
+                  label="通知邮箱"
+                  hint={`用于接收填报退回通知，仅支持 @${emailAllowedDomain}`}
+                >
+                  <Input
+                    type="email"
+                    value={creatingUser.email ?? ""}
+                    onChange={(event) =>
+                      setCreatingUser({
+                        ...creatingUser,
+                        email: event.target.value.toLowerCase() || null,
+                      })
+                    }
+                    autoComplete="email"
+                    placeholder={`name@${emailAllowedDomain}`}
+                  />
+                </Field>
+                <Field label="所属部门">
+                  <Select
+                    value={creatingUser.departmentId ?? ""}
+                    onChange={(event) =>
+                      setCreatingUser({
+                        ...creatingUser,
+                        departmentId: event.target.value ? Number(event.target.value) : null,
+                      })
+                    }
+                  >
+                    <option value="">不绑定部门</option>
+                    {references.data?.departments
+                      .filter((department) => department.enabled)
+                      .map((department) => (
+                        <option key={department.id} value={department.id}>
+                          {department.name}
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
+                <Field label="角色权限" hint="工作人员可填报；管理员可审核、发布和管理系统。">
+                  <Select
+                    value={creatingUser.role}
+                    onChange={(event) =>
+                      setCreatingUser({ ...creatingUser, role: event.target.value as Role })
+                    }
+                  >
+                    {Object.entries(roleLabels)
+                      .filter(
+                        ([value]) => currentUser.role === "system_admin" || value !== "system_admin",
+                      )
+                      .map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
+                <Field label="账号状态">
+                  <Select
+                    value={creatingUser.status}
+                    onChange={(event) =>
+                      setCreatingUser({
+                        ...creatingUser,
+                        status: event.target.value as "active" | "disabled",
+                      })
+                    }
+                  >
+                    <option value="active">启用</option>
+                    <option value="disabled">停用</option>
+                  </Select>
+                </Field>
+                {createUser.error && (
+                  <p className="text-sm text-red-700 md:col-span-2 xl:col-span-3">
+                    {createUser.error instanceof Error ? createUser.error.message : "创建用户失败"}
+                  </p>
+                )}
+                <div className="flex gap-3 md:col-span-2 xl:col-span-3">
+                  <Button
+                    type="submit"
+                    loading={createUser.isPending}
+                    disabled={
+                      !creatingUser.username.trim() ||
+                      !creatingUser.name.trim() ||
+                      creatingUser.password.length < 8
+                    }
+                  >
+                    创建用户
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => setCreatingUser(null)}>
+                    取消
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          )}
           {editingUser && (
             <Card className="p-5">
               <div className="flex items-start justify-between gap-4">
@@ -266,6 +446,23 @@ export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser })
                     }
                     autoComplete="new-password"
                     placeholder="留空则保持原密码"
+                  />
+                </Field>
+                <Field
+                  label="通知邮箱"
+                  hint={`用于接收填报退回通知，仅支持 @${emailAllowedDomain}`}
+                >
+                  <Input
+                    type="email"
+                    value={editingUser.email ?? ""}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        email: event.target.value.toLowerCase() || null,
+                      })
+                    }
+                    autoComplete="email"
+                    placeholder={`name@${emailAllowedDomain}`}
                   />
                 </Field>
                 <Field label="所属部门">
@@ -342,11 +539,12 @@ export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser })
           )}
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-left text-sm">
+              <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
                   <tr>
                     <th className="px-5 py-3">姓名</th>
                     <th className="px-5 py-3">登录账号</th>
+                    <th className="px-5 py-3">通知邮箱</th>
                     <th className="px-5 py-3">所属部门</th>
                     <th className="px-5 py-3">角色</th>
                     <th className="px-5 py-3">状态</th>
@@ -359,6 +557,9 @@ export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser })
                     <tr key={user.id}>
                       <td className="px-5 py-4 font-semibold text-ink-900">{user.name}</td>
                       <td className="px-5 py-4 font-mono text-xs text-slate-600">{user.username}</td>
+                      <td className="px-5 py-4 text-slate-600">
+                        {user.email ?? <span className="text-amber-700">未绑定</span>}
+                      </td>
                       <td className="px-5 py-4 text-slate-600">{user.department ?? "—"}</td>
                       <td className="px-5 py-4 text-slate-600">{roleLabels[user.role]}</td>
                       <td className="px-5 py-4">
@@ -383,17 +584,19 @@ export function AdminSettingsPage({ currentUser }: { currentUser: CurrentUser })
                             variant="ghost"
                             className="min-h-9 px-3"
                             disabled={currentUser.role === "admin" && user.role === "system_admin"}
-                            onClick={() =>
+                            onClick={() => {
+                              setCreatingUser(null);
                               setEditingUser({
                                 id: user.id,
                                 username: user.username,
                                 name: user.name,
+                                email: user.email,
                                 role: user.role,
                                 status: user.status,
                                 departmentId: user.departmentId,
                                 password: "",
-                              })
-                            }
+                              });
+                            }}
                           >
                             <Pencil className="size-4" /> 编辑
                           </Button>

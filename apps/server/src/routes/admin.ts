@@ -7,6 +7,7 @@ import { requireAdmin } from "../middleware/auth.js";
 import { audit } from "../services/audit.js";
 import { hashPassword } from "../services/password.js";
 import { getScheduleSettings } from "../services/schedule-settings.js";
+import { config } from "../config.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -31,7 +32,7 @@ adminRouter.get("/audit-logs", (request, response) => {
 adminRouter.get("/users", (_request, response) => {
   const rows = sqlite
     .prepare(
-      `SELECT u.id, u.username, u.name, u.avatar, u.role, u.status,
+      `SELECT u.id, u.username, u.name, u.email, u.avatar, u.role, u.status,
        u.department_id AS departmentId, u.last_login_at AS lastLoginAt, d.name AS department
        FROM users u LEFT JOIN departments d ON d.id=u.department_id ORDER BY u.id`,
     )
@@ -39,7 +40,7 @@ adminRouter.get("/users", (_request, response) => {
   response.json({ rows });
 });
 
-const userUpdateSchema = z.object({
+const userFieldsSchema = z.object({
   username: z
     .string()
     .trim()
@@ -48,10 +49,77 @@ const userUpdateSchema = z.object({
     .max(50)
     .regex(/^[a-z0-9._-]+$/, "登录账号只能包含小写字母、数字、点、下划线和连字符"),
   name: z.string().trim().min(1, "请填写姓名").max(50),
+  email: z
+    .union([z.literal(""), z.string().trim().toLowerCase().email("请输入有效的邮箱地址")])
+    .nullable()
+    .optional()
+    .transform((value) => value || null)
+    .refine(
+      (value) => !value || value.endsWith(`@${config.emailAllowedDomain}`),
+      `仅支持 @${config.emailAllowedDomain} 邮箱`,
+    ),
   role: roleSchema,
   status: z.enum(["active", "disabled"]),
   departmentId: z.number().int().positive().nullable().optional(),
+});
+
+const userCreateSchema = userFieldsSchema.extend({
+  password: z.string().min(8, "密码至少 8 个字符").max(128),
+});
+
+const userUpdateSchema = userFieldsSchema.extend({
   password: z.string().min(8, "密码至少 8 个字符").max(128).optional(),
+});
+
+adminRouter.post("/users", (request, response) => {
+  const input = userCreateSchema.parse(request.body);
+  if (request.currentUser!.role === "admin" && input.role === "system_admin") {
+    throw new HttpError(403, "管理员不能授予系统管理员角色");
+  }
+  const duplicate = sqlite
+    .prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE")
+    .get(input.username);
+  if (duplicate) throw new HttpError(409, "该登录账号已被使用");
+  if (
+    input.email &&
+    sqlite.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE").get(input.email)
+  ) {
+    throw new HttpError(409, "该邮箱已绑定其他账号");
+  }
+  if (input.departmentId) {
+    const department = sqlite
+      .prepare("SELECT id FROM departments WHERE id=? AND enabled=1")
+      .get(input.departmentId);
+    if (!department) throw new HttpError(400, "所选部门不存在或已停用");
+  }
+  const stamp = nowIso();
+  const result = sqlite
+    .prepare(
+      `INSERT INTO users(
+       username, password_hash, name, email, role, status, department_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.username,
+      hashPassword(input.password),
+      input.name,
+      input.email,
+      input.role,
+      input.status,
+      input.departmentId ?? null,
+      stamp,
+      stamp,
+    );
+  const id = Number(result.lastInsertRowid);
+  audit(request, "user.create", "user", id, {
+    username: input.username,
+    name: input.name,
+    email: input.email,
+    role: input.role,
+    status: input.status,
+    departmentId: input.departmentId ?? null,
+  });
+  response.status(201).json({ id });
 });
 
 adminRouter.patch("/users/:id", (request, response) => {
@@ -74,16 +142,23 @@ adminRouter.patch("/users/:id", (request, response) => {
     .prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE AND id<>?")
     .get(input.username, id);
   if (duplicate) throw new HttpError(409, "该登录账号已被使用");
+  if (
+    input.email &&
+    sqlite.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE AND id<>?").get(input.email, id)
+  ) {
+    throw new HttpError(409, "该邮箱已绑定其他账号");
+  }
   const stamp = nowIso();
   const result = input.password
     ? sqlite
         .prepare(
-          `UPDATE users SET username=?, name=?, role=?, status=?, department_id=?,
+          `UPDATE users SET username=?, name=?, email=?, role=?, status=?, department_id=?,
            password_hash=?, updated_at=? WHERE id=?`,
         )
         .run(
           input.username,
           input.name,
+          input.email,
           input.role,
           input.status,
           input.departmentId ?? null,
@@ -93,12 +168,13 @@ adminRouter.patch("/users/:id", (request, response) => {
         )
     : sqlite
         .prepare(
-          `UPDATE users SET username=?, name=?, role=?, status=?, department_id=?,
+          `UPDATE users SET username=?, name=?, email=?, role=?, status=?, department_id=?,
            updated_at=? WHERE id=?`,
         )
         .run(
           input.username,
           input.name,
+          input.email,
           input.role,
           input.status,
           input.departmentId ?? null,

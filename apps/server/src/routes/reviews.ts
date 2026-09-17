@@ -4,6 +4,7 @@ import { nowIso, sqlite } from "../db/client.js";
 import { HttpError } from "../http.js";
 import { requireAdmin } from "../middleware/auth.js";
 import { audit } from "../services/audit.js";
+import { enqueueReturnNotification } from "../services/email-notifications.js";
 import { getSubmission } from "../services/submissions.js";
 import { getAcademicTerm } from "../services/schedule-settings.js";
 
@@ -68,9 +69,24 @@ reviewsRouter.post("/:id/return", (request, response) => {
   const input = returnInputSchema.parse(request.body);
   const existing = getSubmission(id);
   if (existing.status !== "submitted") throw new HttpError(409, "申请已不在待审核状态");
+  const recipient = sqlite
+    .prepare(
+      `SELECT u.email, u.name AS applicantName, s.academic_year AS academicYear,
+       s.semester, s.week, COALESCE(d.name, s.custom_department, '未设置部门') AS department
+       FROM submissions s JOIN users u ON u.id=s.applicant_user_id
+       LEFT JOIN departments d ON d.id=s.department_id WHERE s.id=?`,
+    )
+    .get(id) as {
+    email: string | null;
+    applicantName: string;
+    academicYear: string;
+    semester: string;
+    week: number;
+    department: string;
+  };
   const stamp = nowIso();
   sqlite.transaction(() => {
-    sqlite
+    const reviewLog = sqlite
       .prepare(
         `UPDATE submissions SET status='returned', returned_at=?, returned_by=?,
          return_reason=?, updated_at=? WHERE id=?`,
@@ -82,7 +98,23 @@ reviewsRouter.post("/:id/return", (request, response) => {
          VALUES (?, 'return', 'submitted', 'returned', ?, ?, ?)`,
       )
       .run(id, input.comment, request.currentUser!.id, stamp);
+    if (recipient.email) {
+      enqueueReturnNotification({
+        submissionId: id,
+        reviewLogId: Number(reviewLog.lastInsertRowid),
+        recipient: recipient.email,
+        applicantName: recipient.applicantName,
+        academicYear: recipient.academicYear,
+        semester: recipient.semester,
+        week: recipient.week,
+        department: recipient.department,
+        reason: input.comment,
+      });
+    }
   })();
-  audit(request, "review.return", "submission", id, input);
+  audit(request, "review.return", "submission", id, {
+    ...input,
+    emailNotification: recipient.email ? "queued" : "skipped_no_email",
+  });
   response.json(getSubmission(id));
 });

@@ -12,6 +12,7 @@
 - 历史发布版本留存
 - 电脑版 A4 横向 PDF 与手机版竖向 PDF
 - 部门、地点、账号、学年学期和周次配置
+- 用户通知邮箱绑定与填报退回邮件通知
 - 审计日志与基于 SQLite 的会话存储
 - 旧 Laravel/MySQL 数据迁移工具
 
@@ -62,6 +63,7 @@ npm run dev
 常用环境变量见 [.env.example](.env.example)：
 
 - `ORGANIZATION_NAME`：界面、PDF 和下载文件名中显示的组织名称
+- `EMAIL_ALLOWED_DOMAIN`：允许用户绑定的组织邮箱域名
 - `DATABASE_PATH`：SQLite 数据库路径
 - `MEETING_SCHEDULE_ACADEMIC_YEAR`：默认学年
 - `MEETING_SCHEDULE_SEMESTER`：默认学期
@@ -69,6 +71,24 @@ npm run dev
 - `PLAYWRIGHT_CHROMIUM_PATH`：可选的 Chromium 可执行文件路径
 
 部门、地点、账号及学期周次也可在系统管理界面维护。
+
+### 退回邮件通知
+
+管理员可在“系统管理 → 用户账号”中绑定用户的组织邮箱。管理员退回填报后，系统会把通知写入持久化邮件队列，邮件包含学期周次、部门、退回原因和修改入口；投递失败不会阻断审核操作，并会自动重试。
+
+在 `.env` 中配置 SMTP 服务。敏感凭据不得提交到仓库：
+
+```dotenv
+EMAIL_ALLOWED_DOMAIN=example.org
+SMTP_HOST=smtp.example.org
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=notifications@example.org
+SMTP_PASSWORD=邮箱客户端专用密码或授权码
+SMTP_FROM=notifications@example.org
+```
+
+未配置 SMTP 时通知会保留在队列中，配置并重启服务后自动尝试发送。
 
 ## 生产构建
 

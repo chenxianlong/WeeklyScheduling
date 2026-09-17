@@ -11,20 +11,24 @@ describe("administrator management permissions", () => {
   let csrfToken = "";
   let closeDatabase: (() => void) | undefined;
   let sqlite: typeof import("../apps/server/src/db/client.js")["sqlite"];
+  let verifyPassword: typeof import("../apps/server/src/services/password.js")["verifyPassword"];
 
   beforeAll(async () => {
     process.env.DATABASE_PATH = databasePath;
     process.env.SESSION_SECRET = "admin-management-test-secret";
     process.env.SEED_ADMIN_PASSWORD = "TestOnly-Admin-2026!";
     process.env.SEED_STAFF_PASSWORD = "TestOnly-Staff-2026!";
+    process.env.EMAIL_ALLOWED_DOMAIN = "example.org";
     process.env.NODE_ENV = "test";
 
     await import("../apps/server/src/db/seed.js");
-    const [{ createApp }, database, { hashPassword }] = await Promise.all([
+    const [{ createApp }, database, passwordService] = await Promise.all([
       import("../apps/server/src/app.js"),
       import("../apps/server/src/db/client.js"),
       import("../apps/server/src/services/password.js"),
     ]);
+    const { hashPassword } = passwordService;
+    verifyPassword = passwordService.verifyPassword;
     sqlite = database.sqlite;
     closeDatabase = () => sqlite.close();
     const stamp = new Date().toISOString();
@@ -71,6 +75,123 @@ describe("administrator management permissions", () => {
         departmentId: null,
       })
       .expect(403);
+  });
+
+  it("allows an administrator to create users within their role boundary", async () => {
+    const created = await agent
+      .post("/api/admin/users")
+      .set("x-csrf-token", csrfToken)
+      .send({
+        username: "new-staff",
+        name: "新增填报员",
+        email: "new-staff@example.org",
+        password: "NewStaff@2026",
+        role: "staff",
+        status: "active",
+        departmentId: 1,
+      })
+      .expect(201);
+
+    const saved = sqlite
+      .prepare("SELECT username, email, password_hash, role, status, department_id FROM users WHERE id=?")
+      .get(created.body.id) as {
+      username: string;
+      email: string;
+      password_hash: string;
+      role: string;
+      status: string;
+      department_id: number;
+    };
+    expect(saved).toMatchObject({
+      username: "new-staff",
+      email: "new-staff@example.org",
+      role: "staff",
+      status: "active",
+      department_id: 1,
+    });
+    expect(verifyPassword("NewStaff@2026", saved.password_hash)).toBe(true);
+
+    await agent
+      .post("/api/admin/users")
+      .set("x-csrf-token", csrfToken)
+      .send({
+        username: "new-staff",
+        name: "重复账号",
+        email: "another@example.org",
+        password: "NewStaff@2026",
+        role: "staff",
+        status: "active",
+        departmentId: 1,
+      })
+      .expect(409);
+
+    await agent
+      .post("/api/admin/users")
+      .set("x-csrf-token", csrfToken)
+      .send({
+        username: "another-system-admin",
+        name: "越权账号",
+        email: "system-admin@example.org",
+        password: "SystemAdmin@2026",
+        role: "system_admin",
+        status: "active",
+        departmentId: null,
+      })
+      .expect(403);
+
+    await agent
+      .post("/api/admin/users")
+      .set("x-csrf-token", csrfToken)
+      .send({
+        username: "external-email",
+        name: "外部邮箱",
+        email: "someone@outside.example",
+        password: "External@2026",
+        role: "staff",
+        status: "active",
+        departmentId: 1,
+      })
+      .expect(422);
+  });
+
+  it("queues an email notification when a bound user's submission is returned", async () => {
+    const stamp = new Date().toISOString();
+    const applicant = sqlite
+      .prepare("SELECT id FROM users WHERE username='new-staff'")
+      .get() as { id: number };
+    const submissionId = Number(
+      sqlite
+        .prepare(
+          `INSERT INTO submissions(
+           academic_year, semester, week, department_id, applicant_user_id,
+           status, submitted_at, created_at, updated_at
+           ) VALUES ('2026-2027', '一', 3, 1, ?, 'submitted', ?, ?, ?)`,
+        )
+        .run(applicant.id, stamp, stamp, stamp).lastInsertRowid,
+    );
+
+    await agent
+      .post(`/api/admin/reviews/${submissionId}/return`)
+      .set("x-csrf-token", csrfToken)
+      .send({ comment: "请补充参加人员信息" })
+      .expect(200);
+
+    const notification = sqlite
+      .prepare(
+        `SELECT recipient, subject, text_body AS textBody, status, attempts
+         FROM email_notifications WHERE submission_id=?`,
+      )
+      .get(submissionId) as {
+      recipient: string;
+      subject: string;
+      textBody: string;
+      status: string;
+      attempts: number;
+    };
+    expect(notification.recipient).toBe("new-staff@example.org");
+    expect(notification.subject).toContain("第3周填报已退回");
+    expect(notification.textBody).toContain("请补充参加人员信息");
+    expect(notification).toMatchObject({ status: "pending", attempts: 0 });
   });
 
   it("deletes unused users and reference data but preserves referenced data", async () => {

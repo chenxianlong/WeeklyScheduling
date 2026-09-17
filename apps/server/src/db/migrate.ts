@@ -7,6 +7,7 @@ const migrations = [
     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
+    email TEXT,
     avatar TEXT,
     department_id INTEGER,
     role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('staff','admin','system_admin')),
@@ -127,6 +128,24 @@ const migrations = [
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs(created_at DESC);
+  CREATE TABLE IF NOT EXISTS email_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id INTEGER REFERENCES submissions(id) ON DELETE SET NULL,
+    review_log_id INTEGER UNIQUE REFERENCES review_logs(id) ON DELETE SET NULL,
+    recipient TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    text_body TEXT NOT NULL,
+    html_body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sending','sent','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TEXT NOT NULL,
+    sent_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS email_notifications_queue_idx
+    ON email_notifications(status, next_attempt_at);
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -138,6 +157,14 @@ const migrations = [
 
 sqlite.transaction(() => {
   for (const migration of migrations) sqlite.exec(migration);
+  const userColumns = sqlite.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+  if (!userColumns.some((column) => column.name === "email")) {
+    sqlite.exec("ALTER TABLE users ADD COLUMN email TEXT");
+  }
+  sqlite.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique
+     ON users(email COLLATE NOCASE) WHERE email IS NOT NULL`,
+  );
 })();
 
 console.log(`Database migrated: ${sqlite.name}`);

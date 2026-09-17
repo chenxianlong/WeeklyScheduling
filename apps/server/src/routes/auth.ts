@@ -26,6 +26,7 @@ authRouter.get("/me", (request, response) => {
     config: {
       currentWeek: currentWeek(),
       schoolName: config.organizationName,
+      emailAllowedDomain: config.emailAllowedDomain,
       ...settings,
     },
   });

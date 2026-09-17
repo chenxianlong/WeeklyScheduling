@@ -14,6 +14,7 @@ export type AppConfig = {
   semester: string;
   currentWeek: number;
   schoolName: string;
+  emailAllowedDomain: string;
   preWeekStartDate: string | null;
   firstWeekStartDate: string | null;
 };
