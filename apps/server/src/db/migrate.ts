@@ -117,16 +117,6 @@ const migrations = [
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS publication_items_publication_idx ON publication_items(publication_id, sort_order);
-  CREATE TABLE IF NOT EXISTS publication_item_exclusions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_submission_id INTEGER NOT NULL,
-    source_item_id INTEGER NOT NULL UNIQUE,
-    item_name TEXT NOT NULL,
-    excluded_by INTEGER NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS publication_item_exclusions_submission_idx
-    ON publication_item_exclusions(source_submission_id, source_item_id);
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id),

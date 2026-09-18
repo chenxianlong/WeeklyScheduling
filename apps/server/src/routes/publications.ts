@@ -49,9 +49,7 @@ publicationsRouter.get("/admin/workspace", requireAdmin, (request, response) => 
        JOIN submission_items i ON i.submission_id=s.id
        LEFT JOIN departments d ON d.id=s.department_id
        LEFT JOIN locations l ON l.id=i.location_id
-       LEFT JOIN publication_item_exclusions e ON e.source_item_id=i.id
        WHERE s.status='approved' AND s.academic_year=? AND s.semester=? AND s.week=?
-       AND e.id IS NULL
        ORDER BY i.start_time, s.id, i.sort_order`,
     )
     .all(term.academicYear, term.semester, week);
@@ -73,12 +71,11 @@ publicationsRouter.delete("/admin/workspace/items/:itemId", requireAdmin, (reque
        s.id AS submissionId, s.academic_year AS academicYear, s.semester, s.week,
        s.applicant_user_id AS applicantUserId, u.name AS applicantName,
        COALESCE(d.name, s.custom_department, '未设置部门') AS department,
-       e.id AS exclusionId
+       (SELECT COUNT(*) FROM submission_items sibling WHERE sibling.submission_id=s.id) AS itemCount
        FROM submission_items i
        JOIN submissions s ON s.id=i.submission_id
        JOIN users u ON u.id=s.applicant_user_id
        LEFT JOIN departments d ON d.id=s.department_id
-       LEFT JOIN publication_item_exclusions e ON e.source_item_id=i.id
        WHERE i.id=? AND s.status='approved'`,
     )
     .get(sourceItemId) as
@@ -93,25 +90,26 @@ publicationsRouter.delete("/admin/workspace/items/:itemId", requireAdmin, (reque
         applicantUserId: number;
         applicantName: string;
         department: string;
-        exclusionId: number | null;
+        itemCount: number;
       }
     | undefined;
   if (!item) throw new HttpError(404, "待发布项目不存在");
-  if (item.exclusionId) throw new HttpError(409, "该项目已从发布内容中删除");
   const recipients = (
     sqlite
       .prepare("SELECT email FROM user_emails WHERE user_id=? AND verified_at IS NOT NULL ORDER BY id")
       .all(item.applicantUserId) as Array<{ email: string }>
   ).map((row) => row.email);
-  const stamp = nowIso();
   sqlite.transaction(() => {
     sqlite
       .prepare(
-        `INSERT INTO publication_item_exclusions(
-         source_submission_id, source_item_id, item_name, excluded_by, created_at
-         ) VALUES (?, ?, ?, ?, ?)`,
+        `UPDATE publication_items SET source_submission_id=NULL, source_item_id=NULL
+         WHERE source_submission_id=?`,
       )
-      .run(item.submissionId, item.sourceItemId, item.itemName, request.currentUser!.id, stamp);
+      .run(item.submissionId);
+    sqlite.prepare("DELETE FROM email_notifications WHERE submission_id=?").run(item.submissionId);
+    sqlite.prepare("DELETE FROM review_logs WHERE submission_id=?").run(item.submissionId);
+    sqlite.prepare("DELETE FROM submission_items WHERE submission_id=?").run(item.submissionId);
+    sqlite.prepare("DELETE FROM submissions WHERE id=?").run(item.submissionId);
     if (recipients.length) {
       enqueuePublicationRemovalNotification({
         submissionId: item.submissionId,
@@ -130,9 +128,10 @@ publicationsRouter.delete("/admin/workspace/items/:itemId", requireAdmin, (reque
   audit(request, "publication.workspace_item.delete", "submission_item", sourceItemId, {
     submissionId: item.submissionId,
     itemName: item.itemName,
+    deletedItemCount: item.itemCount,
     emailNotification: recipients.length ? `queued:${recipients.length}` : "skipped_no_email",
   });
-  response.json({ ok: true, emailQueued: recipients.length });
+  response.json({ ok: true, emailQueued: recipients.length, deletedItemCount: item.itemCount });
 });
 
 const publishSchema = z.object({
