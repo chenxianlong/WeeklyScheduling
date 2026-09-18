@@ -78,6 +78,36 @@ export function enqueueApprovalNotification(input: Omit<ReturnNotification, "rea
   }
 }
 
+export function enqueuePublicationRemovalNotification(input: {
+  submissionId: number;
+  sourceItemId: number;
+  recipients: string[];
+  applicantName: string;
+  academicYear: string;
+  semester: string;
+  week: number;
+  department: string;
+  itemName: string;
+  startTime: string;
+}) {
+  const subject = `【周工作安排】第${input.week}周“${input.itemName}”已从发布内容中删除`;
+  const detailUrl = `${config.appUrl.replace(/\/$/, "")}/submissions/${input.submissionId}`;
+  const term = `${input.academicYear}学年度第${input.semester}学期`;
+  const startTime = new Date(input.startTime).toLocaleString("zh-CN", { hour12: false });
+  const textBody = `${input.applicantName}，您好：\n\n您填报的“${input.itemName}”已由管理员从${term}第${input.week}周发布内容中删除。\n\n部门：${input.department}\n开始时间：${startTime}\n\n原填报和审核记录仍保留，但该项目不再进入本周发布安排。\n\n查看填报：${detailUrl}\n\n${config.organizationName}周工作安排系统`;
+  const htmlBody = `<div style="font-family:'Microsoft YaHei',Arial,sans-serif;color:#1e293b;line-height:1.8;max-width:640px;margin:auto"><h2 style="color:#8a1c22">周工作安排发布内容删除通知</h2><p>${escapeHtml(input.applicantName)}，您好：</p><p>您填报的 <strong>${escapeHtml(input.itemName)}</strong> 已由管理员从 <strong>${escapeHtml(term)}第${input.week}周</strong> 发布内容中删除。</p><div style="background:#fff7ed;border-left:4px solid #c2410c;padding:12px 16px;margin:20px 0"><strong>部门：</strong>${escapeHtml(input.department)}<br><strong>开始时间：</strong>${escapeHtml(startTime)}</div><p>原填报和审核记录仍保留，但该项目不再进入本周发布安排。</p><p><a href="${escapeHtml(detailUrl)}" style="display:inline-block;background:#8a1c22;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px">查看原填报</a></p><p style="margin-top:28px;color:#64748b;font-size:13px">此邮件由${escapeHtml(config.organizationName)}周工作安排系统自动发送，请勿直接回复。</p></div>`;
+  for (const recipient of input.recipients) {
+    queueEmail({
+      submissionId: input.submissionId,
+      dedupeKey: `publication-remove:${input.sourceItemId}:${recipient}`,
+      recipient,
+      subject,
+      textBody,
+      htmlBody,
+    });
+  }
+}
+
 function queueEmail(input: {
   submissionId?: number;
   dedupeKey: string;

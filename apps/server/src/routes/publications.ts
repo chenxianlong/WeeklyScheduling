@@ -7,6 +7,7 @@ import { nowIso, sqlite } from "../db/client.js";
 import { asyncRoute, HttpError } from "../http.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { audit } from "../services/audit.js";
+import { enqueuePublicationRemovalNotification } from "../services/email-notifications.js";
 import {
   generatePublicationPdf,
   mobilePdfPath,
@@ -48,7 +49,9 @@ publicationsRouter.get("/admin/workspace", requireAdmin, (request, response) => 
        JOIN submission_items i ON i.submission_id=s.id
        LEFT JOIN departments d ON d.id=s.department_id
        LEFT JOIN locations l ON l.id=i.location_id
+       LEFT JOIN publication_item_exclusions e ON e.source_item_id=i.id
        WHERE s.status='approved' AND s.academic_year=? AND s.semester=? AND s.week=?
+       AND e.id IS NULL
        ORDER BY i.start_time, s.id, i.sort_order`,
     )
     .all(term.academicYear, term.semester, week);
@@ -60,6 +63,76 @@ publicationsRouter.get("/admin/workspace", requireAdmin, (request, response) => 
     )
     .get(term.academicYear, term.semester, week);
   response.json({ week, items, latest });
+});
+
+publicationsRouter.delete("/admin/workspace/items/:itemId", requireAdmin, (request, response) => {
+  const sourceItemId = Number(request.params.itemId);
+  const item = sqlite
+    .prepare(
+      `SELECT i.id AS sourceItemId, i.name AS itemName, i.start_time AS startTime,
+       s.id AS submissionId, s.academic_year AS academicYear, s.semester, s.week,
+       s.applicant_user_id AS applicantUserId, u.name AS applicantName,
+       COALESCE(d.name, s.custom_department, '未设置部门') AS department,
+       e.id AS exclusionId
+       FROM submission_items i
+       JOIN submissions s ON s.id=i.submission_id
+       JOIN users u ON u.id=s.applicant_user_id
+       LEFT JOIN departments d ON d.id=s.department_id
+       LEFT JOIN publication_item_exclusions e ON e.source_item_id=i.id
+       WHERE i.id=? AND s.status='approved'`,
+    )
+    .get(sourceItemId) as
+    | {
+        sourceItemId: number;
+        itemName: string;
+        startTime: string;
+        submissionId: number;
+        academicYear: string;
+        semester: string;
+        week: number;
+        applicantUserId: number;
+        applicantName: string;
+        department: string;
+        exclusionId: number | null;
+      }
+    | undefined;
+  if (!item) throw new HttpError(404, "待发布项目不存在");
+  if (item.exclusionId) throw new HttpError(409, "该项目已从发布内容中删除");
+  const recipients = (
+    sqlite
+      .prepare("SELECT email FROM user_emails WHERE user_id=? AND verified_at IS NOT NULL ORDER BY id")
+      .all(item.applicantUserId) as Array<{ email: string }>
+  ).map((row) => row.email);
+  const stamp = nowIso();
+  sqlite.transaction(() => {
+    sqlite
+      .prepare(
+        `INSERT INTO publication_item_exclusions(
+         source_submission_id, source_item_id, item_name, excluded_by, created_at
+         ) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(item.submissionId, item.sourceItemId, item.itemName, request.currentUser!.id, stamp);
+    if (recipients.length) {
+      enqueuePublicationRemovalNotification({
+        submissionId: item.submissionId,
+        sourceItemId: item.sourceItemId,
+        recipients,
+        applicantName: item.applicantName,
+        academicYear: item.academicYear,
+        semester: item.semester,
+        week: item.week,
+        department: item.department,
+        itemName: item.itemName,
+        startTime: item.startTime,
+      });
+    }
+  })();
+  audit(request, "publication.workspace_item.delete", "submission_item", sourceItemId, {
+    submissionId: item.submissionId,
+    itemName: item.itemName,
+    emailNotification: recipients.length ? `queued:${recipients.length}` : "skipped_no_email",
+  });
+  response.json({ ok: true, emailQueued: recipients.length });
 });
 
 const publishSchema = z.object({

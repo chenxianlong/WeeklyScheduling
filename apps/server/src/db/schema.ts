@@ -108,3 +108,12 @@ export const weeklyPublications = sqliteTable(
     ),
   ],
 );
+
+export const publicationItemExclusions = sqliteTable("publication_item_exclusions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sourceSubmissionId: integer("source_submission_id").notNull(),
+  sourceItemId: integer("source_item_id").notNull().unique(),
+  itemName: text("item_name").notNull(),
+  excludedBy: integer("excluded_by").notNull(),
+  createdAt: text("created_at").notNull(),
+});

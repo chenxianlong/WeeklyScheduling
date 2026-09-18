@@ -278,6 +278,67 @@ describe("administrator management permissions", () => {
     expect(sqlite.prepare("SELECT id FROM review_logs WHERE submission_id=?").get(submissionId)).toBeUndefined();
   });
 
+  it("permanently removes an approved item from the publication workspace and notifies its applicant", async () => {
+    const stamp = new Date().toISOString();
+    const applicant = sqlite
+      .prepare("SELECT id FROM users WHERE username='new-staff'")
+      .get() as { id: number };
+    const submissionId = Number(
+      sqlite
+        .prepare(
+          `INSERT INTO submissions(
+           academic_year, semester, week, department_id, applicant_user_id,
+           status, submitted_at, approved_at, created_at, updated_at
+           ) VALUES ('2026-2027', '一', 5, 1, ?, 'approved', ?, ?, ?, ?)`,
+        )
+        .run(applicant.id, stamp, stamp, stamp, stamp).lastInsertRowid,
+    );
+    const itemId = Number(
+      sqlite
+        .prepare(
+          `INSERT INTO submission_items(
+           submission_id, type, name, start_time, end_time, custom_location,
+           participants, remark, sort_order, created_at, updated_at
+           ) VALUES (?, 'meeting', '待删除会议', '2026-09-28T09:00:00.000Z',
+           '2026-09-28T10:00:00.000Z', '测试会议室', '测试人员', '测试内容', 0, ?, ?)`,
+        )
+        .run(submissionId, stamp, stamp).lastInsertRowid,
+    );
+
+    const before = await agent.get("/api/publications/admin/workspace?week=5").expect(200);
+    expect(before.body.items.some((item: { sourceItemId: number }) => item.sourceItemId === itemId)).toBe(true);
+
+    const removed = await agent
+      .delete(`/api/publications/admin/workspace/items/${itemId}`)
+      .set("x-csrf-token", csrfToken)
+      .expect(200);
+    expect(removed.body).toMatchObject({ ok: true, emailQueued: 2 });
+
+    const after = await agent.get("/api/publications/admin/workspace?week=5").expect(200);
+    expect(after.body.items.some((item: { sourceItemId: number }) => item.sourceItemId === itemId)).toBe(false);
+    expect(sqlite.prepare("SELECT id FROM submission_items WHERE id=?").get(itemId)).toBeDefined();
+    expect(
+      sqlite.prepare("SELECT id FROM publication_item_exclusions WHERE source_item_id=?").get(itemId),
+    ).toBeDefined();
+    const notifications = sqlite
+      .prepare(
+        `SELECT recipient, subject, text_body AS textBody
+         FROM email_notifications WHERE submission_id=? ORDER BY id`,
+      )
+      .all(submissionId) as Array<{ recipient: string; subject: string; textBody: string }>;
+    expect(notifications.map((row) => row.recipient)).toEqual([
+      "new-staff@example.org",
+      "new-staff2@example.org",
+    ]);
+    expect(notifications[0].subject).toContain("待删除会议");
+    expect(notifications[0].textBody).toContain("已由管理员从");
+
+    await agent
+      .delete(`/api/publications/admin/workspace/items/${itemId}`)
+      .set("x-csrf-token", csrfToken)
+      .expect(409);
+  });
+
   it("deletes unused users and reference data but preserves referenced data", async () => {
     const stamp = new Date().toISOString();
     const userId = Number(

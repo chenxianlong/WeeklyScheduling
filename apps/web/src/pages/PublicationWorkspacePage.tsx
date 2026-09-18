@@ -94,6 +94,26 @@ export function PublicationWorkspacePage({ config }: { config: AppConfig }) {
       setError(cause instanceof ApiError ? cause.message : `${editing ? "保存" : "发布"}失败，请检查内容后重试`),
   });
 
+  const removeWorkspaceItem = useMutation({
+    mutationFn: (item: PublicationItemInput) =>
+      mutation<{ ok: true; emailQueued: number }>(
+        `/publications/admin/workspace/items/${item.sourceItemId}`,
+        "DELETE",
+      ),
+    onSuccess: async (result, item) => {
+      setItems((value) => value.filter((entry) => entry.sourceItemId !== item.sourceItemId));
+      setNotice(
+        result.emailQueued
+          ? `“${item.name}”已从发布内容中删除，已向填报人的 ${result.emailQueued} 个邮箱发送通知。`
+          : `“${item.name}”已从发布内容中删除；填报人未绑定已验证邮箱。`,
+      );
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["publication-workspace", week] });
+    },
+    onError: (cause) =>
+      setError(cause instanceof ApiError ? cause.message : "删除失败，请稍后重试"),
+  });
+
   function updateItem(index: number, patch: Partial<PublicationItemInput>) {
     setItems((value) => value.map((item, itemIndex) => (index === itemIndex ? { ...item, ...patch } : item)));
   }
@@ -192,7 +212,15 @@ export function PublicationWorkspacePage({ config }: { config: AppConfig }) {
                     </button>
                     <button
                       className="rounded p-2 text-slate-400 hover:bg-red-50 hover:text-red-700"
-                      onClick={() => setItems((value) => value.filter((_, itemIndex) => itemIndex !== index))}
+                      disabled={removeWorkspaceItem.isPending}
+                      onClick={() => {
+                        if (!window.confirm(`确定将“${item.name}”从发布内容中删除吗？`)) return;
+                        if (!editing && item.sourceItemId) {
+                          removeWorkspaceItem.mutate(item);
+                          return;
+                        }
+                        setItems((value) => value.filter((_, itemIndex) => itemIndex !== index));
+                      }}
                       aria-label={`删除第 ${index + 1} 项`}
                     >
                       <Trash2 className="size-4" />
