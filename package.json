@@ -37,7 +37,7 @@
     "lucide-react": "^0.562.0",
     "mysql2": "^3.16.2",
     "nanoid": "^5.1.6",
-    "nodemailer": "^10.0.10",
+    "nodemailer": "^10.1.4",
     "playwright": "^1.57.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
